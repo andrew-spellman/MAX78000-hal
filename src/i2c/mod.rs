@@ -41,7 +41,7 @@ pub struct I2C<Port = NoPort> {
     slave_address: usize,
     gpio: [GpioPin; 2],
     slave_underflow: bool,
-    transaction_buffer: (usize, [u8; 256]),
+    pub transaction_buffer: (usize, [u8; 256]),
     _ph: PhantomData<Port>,
 }
 
@@ -370,13 +370,13 @@ impl<Port: private::I2CPortCompatable> I2C<Port> {
                     }
                 }
                 Ok(SlaveStatus::WriteRequested) if tx_state => {
+                    unsafe { self.reg.clear_slave_mode_transmit_fifo_underflow_flag() };
                     let data = iter
                         .next()
                         .ok_or(ErrorKind::Underflow)
                         .inspect_err(|_err| {
                             self.slave_underflow = true;
                         })?;
-                    unsafe { self.reg.clear_slave_mode_transmit_fifo_underflow_flag() };
                     unsafe { self.reg.set_fifo_data(data) };
                     unsafe { self.reg.clear_transmit_fifo_threshold_level() };
                 }
@@ -547,16 +547,16 @@ impl<Port: private::I2CPortCompatable> I2C<Port> {
             return Ok(MasterStatus::ReadRequested);
         }
 
+        if self.reg.is_master_data_nack_from_slave_err_active() {
+            return Ok(MasterStatus::SlaveNack);
+        }
+
         if self.reg.get_error_condition() != 0 {
             return Err(ErrorKind::ComError);
         }
 
         if self.reg.is_master_ack_from_external_slave_active() {
             return Ok(MasterStatus::SlaveAck);
-        }
-
-        if self.reg.is_master_data_nack_from_slave_err_active() {
-            return Ok(MasterStatus::SlaveNack);
         }
 
         if self.reg.is_transfer_complete_flag_active() {
